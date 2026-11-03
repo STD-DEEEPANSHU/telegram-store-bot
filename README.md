@@ -1,3 +1,6 @@
+https://dashboard.heroku.com/new?template=https://github.com/STD-DEEPANSHU/telegram-store-bot
+
+
 # ⚡ Telegram Key Store & Automated Delivery Bot
 
 A production-ready Telegram Store Bot built with Python (`aiogram 3.x`), SQLite, Dynamic UPI QR payment generation, and Automated License Key Vault delivery.
