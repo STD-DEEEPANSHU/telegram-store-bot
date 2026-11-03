@@ -1,0 +1,56 @@
+{
+  "name": "Telegram Key Store Bot",
+  "description": "Automated Telegram Key Vault & Store Bot with UPI QR and Instant License Delivery",
+  "keywords": ["telegram", "bot", "aiogram", "store", "key-vault", "python"],
+  "repository": "https://github.com/STD-DEEEPANSHU/telegram-store-bot",
+  "website": "https://t.me/PanelStoreSupport",
+  "stack": "heroku-22",
+  "env": {
+    "BOT_TOKEN": {
+      "description": "Your Telegram Bot Token from @BotFather",
+      "value": "9092141822:AAEojFzqLewKuK9tOGBAKBO_uOvg12l21-s",
+      "required": true
+    },
+    "ADMIN_IDS": {
+      "description": "Comma-separated Telegram user IDs of administrators",
+      "value": "7944664366,7643285650,8299459627",
+      "required": true
+    },
+    "PAYTM_UPI_ID": {
+      "description": "UPI ID for QR Code Payments (e.g. FamPay / Paytm / PhonePe)",
+      "value": "7240207031@fam",
+      "required": true
+    },
+    "PAYEE_NAME": {
+      "description": "Name associated with the UPI ID",
+      "value": "Tanishk Sharma",
+      "required": true
+    },
+    "STORE_NAME": {
+      "description": "Display name of your store in Telegram",
+      "value": "FF PANEL STORE",
+      "required": false
+    },
+    "SUPPORT_LINK": {
+      "description": "Telegram link or username for customer support",
+      "value": "https://t.me/PanelStoreSupport",
+      "required": false
+    },
+    "DOWNLOAD_CHANNEL_URL": {
+      "description": "Link to the download channel",
+      "value": "https://t.me/+GFMaxSxDzsE2NGI1",
+      "required": false
+    }
+  },
+  "formation": {
+    "worker": {
+      "quantity": 1,
+      "size": "eco"
+    }
+  },
+  "buildpacks": [
+    {
+      "url": "heroku/python"
+    }
+  ]
+}
