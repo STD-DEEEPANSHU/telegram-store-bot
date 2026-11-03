@@ -478,6 +478,63 @@ def reject_direct_order(order_req_id):
     conn.close()
     return dict(req)
 
+def deliver_manual_key(user_id: int, key: str, req_id: int = None):
+    conn = get_connection()
+    c = conn.cursor()
+    req = None
+    if req_id:
+        c.execute("SELECT * FROM direct_order_requests WHERE id = ?", (req_id,))
+        req = c.fetchone()
+    else:
+        c.execute("SELECT * FROM direct_order_requests WHERE user_id = ? AND status = 'PENDING' ORDER BY id DESC LIMIT 1", (user_id,))
+        req = c.fetchone()
+
+    now_str = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    if req:
+        order_ref = req["order_ref"]
+        pkg_id = req["package_id"]
+        amount = req["amount_inr"]
+        c.execute("UPDATE direct_order_requests SET status = 'APPROVED' WHERE id = ?", (req["id"],))
+    else:
+        order_ref = f"MAN{user_id}T{int(time.time())}"
+        pkg_id = None
+        amount = 0.0
+
+    c.execute("""
+        INSERT INTO orders (order_ref, user_id, package_id, amount_inr, license_key, status, payment_method, created_at)
+        VALUES (?, ?, ?, ?, ?, 'COMPLETED', 'ADMIN_MANUAL', ?)
+    """, (order_ref, user_id, pkg_id, amount, key, now_str))
+
+    conn.commit()
+    conn.close()
+
+    pkg = get_package(pkg_id) if pkg_id else None
+    return {
+        "order_ref": order_ref,
+        "user_id": user_id,
+        "amount_inr": amount,
+        "license_key": key,
+        "pkg": pkg
+    }
+
+def update_package_price(package_id: int, new_price: float):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("UPDATE packages SET price_inr = ? WHERE id = ?", (new_price, package_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def delete_package(package_id: int):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM keys_stock WHERE package_id = ?", (package_id,))
+    c.execute("DELETE FROM packages WHERE id = ?", (package_id,))
+    conn.commit()
+    conn.close()
+    return True
+
 def get_stats():
     conn = get_connection()
     c = conn.cursor()

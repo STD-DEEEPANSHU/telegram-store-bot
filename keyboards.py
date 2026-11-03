@@ -19,7 +19,7 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🌐 Support", url=support_url)
         ],
         [
-            InlineKeyboardButton(text="🎁 Ludo Spin", callback_data="menu_ludo"),
+            InlineKeyboardButton(text="🎵 STD Music App ↗️", url="https://stdmusicapp-f82ba5b47ed8.herokuapp.com/static/STD_MUSIC.apk"),
             InlineKeyboardButton(text="⬇️ Download Files", callback_data="menu_downloads")
         ]
     ])
@@ -131,16 +131,20 @@ def get_direct_checkout_keyboard(order_ref: str, package_id: int) -> InlineKeybo
 def get_admin_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📦 Add Stock / Keys", callback_data="adm_add_keys"),
-            InlineKeyboardButton(text="💰 Credit User Balance", callback_data="adm_add_bal")
+            InlineKeyboardButton(text="💰 Change Package Price", callback_data="adm_change_price"),
+            InlineKeyboardButton(text="🗑️ Delete Package", callback_data="adm_del_pkg")
+        ],
+        [
+            InlineKeyboardButton(text="🔑 Send Key (/sendkey)", callback_data="adm_sendkey_prompt"),
+            InlineKeyboardButton(text="💳 Credit User Balance", callback_data="adm_add_bal")
         ],
         [
             InlineKeyboardButton(text="🎟️ Create Promo Code", callback_data="adm_create_promo"),
             InlineKeyboardButton(text="📢 Broadcast Message", callback_data="adm_broadcast")
         ],
         [
-            InlineKeyboardButton(text="📊 Bot Analytics", callback_data="adm_stats"),
-            InlineKeyboardButton(text="📋 Pending Deposits", callback_data="adm_deposits")
+            InlineKeyboardButton(text="📦 Add Stock Keys", callback_data="adm_add_keys"),
+            InlineKeyboardButton(text="📊 Bot Analytics", callback_data="adm_stats")
         ],
         [InlineKeyboardButton(text="🔙 Exit Admin", callback_data="menu_home")]
     ])
@@ -148,10 +152,48 @@ def get_admin_main_keyboard() -> InlineKeyboardMarkup:
 def get_direct_order_action_keyboard(req_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="✅ Approve & Deliver Key", callback_data=f"appr_ord_{req_id}"),
+            InlineKeyboardButton(text="🔑 Send Key Now", callback_data=f"send_key_req_{req_id}"),
             InlineKeyboardButton(text="❌ Reject", callback_data=f"rejc_ord_{req_id}")
         ]
     ])
+
+def get_admin_categories_keyboard(categories: list, action_prefix: str = "adm_cat_price") -> InlineKeyboardMarkup:
+    keyboard = []
+    for cat in categories:
+        keyboard.append([InlineKeyboardButton(text=cat["name"], callback_data=f"{action_prefix}_{cat['id']}")])
+    keyboard.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="menu_admin_home")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_brands_keyboard(brands: list, cat_id: int, action_prefix: str = "adm_br_price") -> InlineKeyboardMarkup:
+    keyboard = []
+    for brand in brands:
+        icon = brand.get("icon") or "🛒"
+        keyboard.append([InlineKeyboardButton(text=f"{icon} {brand['name']}", callback_data=f"{action_prefix}_{brand['id']}")])
+    back_target = "adm_change_price" if action_prefix == "adm_br_price" else "adm_del_pkg"
+    keyboard.append([InlineKeyboardButton(text="🔙 Back to Categories", callback_data=back_target)])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_packages_keyboard(packages: list, brand_id: int) -> InlineKeyboardMarkup:
+    keyboard = []
+    for pkg in packages:
+        dur = pkg.get("duration_label") or f"{pkg['duration_days']} Days"
+        text = f"📦 {dur} - ₹{pkg['price_inr']:.2f}"
+        keyboard.append([InlineKeyboardButton(text=text, callback_data=f"adm_setprice_pkg_{pkg['id']}")])
+    brand = db.get_brand(brand_id)
+    cat_id = brand["category_id"] if brand else 1
+    keyboard.append([InlineKeyboardButton(text="🔙 Back to Brands", callback_data=f"adm_cat_price_{cat_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_del_packages_keyboard(packages: list, brand_id: int) -> InlineKeyboardMarkup:
+    keyboard = []
+    for pkg in packages:
+        dur = pkg.get("duration_label") or f"{pkg['duration_days']} Days"
+        text = f"🗑️ Delete {dur} (₹{pkg['price_inr']:.2f})"
+        keyboard.append([InlineKeyboardButton(text=text, callback_data=f"adm_delpkg_conf_{pkg['id']}")])
+    brand = db.get_brand(brand_id)
+    cat_id = brand["category_id"] if brand else 1
+    keyboard.append([InlineKeyboardButton(text="🔙 Back to Brands", callback_data=f"adm_cat_del_{cat_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_deposit_action_keyboard(deposit_id: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[

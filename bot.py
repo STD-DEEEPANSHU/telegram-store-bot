@@ -35,6 +35,10 @@ class BotStates(StatesGroup):
     admin_creating_promo_reward = State()
     admin_creating_promo_uses = State()
     admin_broadcasting = State()
+    admin_sending_key_userid = State()
+    admin_sending_key_text = State()
+    admin_sending_key_for_req = State()
+    admin_editing_price_input = State()
 
 # ==========================================
 # 🌟 /start & MAIN NAVIGATION
@@ -70,7 +74,7 @@ def get_welcome_text() -> str:
         "┣ 👤 <b>My Profile</b> ➔ <i>Account & live wallet</i>\n"
         "┣ 🔑 <b>All History</b> ➔ <i>Past orders & keys</i>\n"
         "┣ 👥 <b>Referral System</b> ➔ <i>Earn 15% bonus</i>\n"
-        "┣ 🎁 <b>Lucky Dice</b> ➔ <i>Daily free balance</i>\n"
+        "┣ 🎵 <b>STD Music APK</b> ➔ <i>Official music app download</i>\n"
         "┣ ⬇️ <b>Download Files</b> ➔ <i>Verified safe APKs</i>\n"
         "┣ 🎬 <b>Tutorials</b> ➔ <i>Bot usage & video guide</i>\n"
         "┗ 🌐 <b>Helpdesk</b> ➔ <i>Live customer support</i>\n\n"
@@ -582,13 +586,14 @@ async def process_direct_order_screenshot(message: types.Message, state: FSMCont
     # Notify Admins
     username_str = f"@{message.from_user.username}" if message.from_user.username else "No username"
     admin_caption = (
-        f"🛒 <b>NEW DIRECT ORDER #{req_id} PENDING APPROVAL</b>\n\n"
+        f"🛒 <b>NEW ORDER #{req_id} PENDING KEY DELIVERY</b>\n\n"
         f"👤 <b>Buyer:</b> {message.from_user.full_name} ({username_str})\n"
-        f"🆔 <b>User ID:</b> <code>{message.from_user.id}</code>\n"
+        f"🆔 <b>User ID:</b> <code>{message.from_user.id}</code> (tap to copy)\n"
         f"📦 <b>Package:</b> {brand_name} ({format_duration(duration_days)})\n"
         f"💵 <b>Amount Due:</b> ₹{price:.2f}\n"
         f"🔖 <b>Order Ref:</b> <code>{order_ref}</code>\n\n"
-        "<i>Check the screenshot below and choose action:</i>"
+        f"💡 <b>To deliver key, send:</b>\n<code>/sendkey {message.from_user.id} &lt;KEY_HERE&gt;</code>\n\n"
+        "<i>Or tap below to enter key or reject:</i>"
     )
     for aid in config.ADMIN_IDS:
         try:
@@ -847,56 +852,138 @@ async def cb_admin_reject_deposit(call: types.CallbackQuery):
         pass
     await call.answer("Deposit Rejected!", show_alert=True)
 
-# Admin: Direct Order Approval / Rejection
-@dp.callback_query(F.data.startswith("appr_ord_"))
-async def cb_admin_approve_order(call: types.CallbackQuery):
-    if call.from_user.id not in config.ADMIN_IDS:
-        await call.answer("Unauthorized", show_alert=True)
-        return
-    req_id = int(call.data.replace("appr_ord_", ""))
-    req, key, pkg = db.approve_direct_order(req_id)
-    if not req:
-        await call.answer("Already processed or invalid!", show_alert=True)
-        return
-    if pkg == "OUT_OF_STOCK":
-        await call.answer("❌ Error: Package is OUT OF STOCK in database! Please add keys first.", show_alert=True)
+# Admin: Manual Key Delivery (/sendkey command)
+@dp.message(Command("sendkey"))
+async def cmd_sendkey(message: types.Message):
+    if message.from_user.id not in config.ADMIN_IDS:
         return
 
-    # Notify Buyer with Key
-    user_id = req["user_id"]
-    delivery_text = (
+    parts = message.text.strip().split(maxsplit=2)
+    if len(parts) < 3:
+        await message.answer(
+            "ℹ️ <b>Usage:</b> <code>/sendkey &lt;user_id&gt; &lt;key&gt;</code>\n\n"
+            "<b>Example:</b>\n"
+            "<code>/sendkey 123456789 CTB-ABCD-1234</code>",
+            parse_mode="HTML"
+        )
+        return
+
+    try:
+        target_uid = int(parts[1].strip())
+    except ValueError:
+        await message.answer("❌ Invalid User ID! It must be numeric (e.g. <code>123456789</code>).", parse_mode="HTML")
+        return
+
+    key_str = parts[2].strip()
+    order_info = db.deliver_manual_key(target_uid, key_str)
+    pkg = order_info.get("pkg")
+    pkg_str = f"{pkg['brand_name']} ({format_duration(pkg['duration_days'])})" if pkg else "VIP Panel License"
+
+    buyer_text = (
         "🎉 <b>PAYMENT APPROVED & LICENSE DELIVERED!</b> 🎉\n\n"
-        f"📦 <b>Package:</b> {pkg['brand_name']} ({format_duration(pkg['duration_days'])})\n"
-        f"💵 <b>Amount Paid:</b> ₹{req['amount_inr']:.2f}\n"
-        f"🆔 <b>Order Ref:</b> <code>{req['order_ref']}</code>\n\n"
+        f"📦 <b>Package:</b> {pkg_str}\n"
+        f"🆔 <b>Order Ref:</b> <code>{order_info['order_ref']}</code>\n\n"
         f"🔑 <b>YOUR LICENSE KEY:</b>\n"
-        f"<code>{key}</code>\n"
+        f"<code>{key_str}</code>\n"
         "<i>(Tap to copy)</i>\n\n"
         f"⬇️ <b>Download Channel:</b> {config.DOWNLOAD_CHANNEL_URL}\n"
         f"🌐 <b>Support:</b> {config.SUPPORT_LINK}\n\n"
         "✨ <i>Thank you for purchasing! Key is also saved in your All History menu.</i>"
     )
-    try:
-        await bot.send_message(chat_id=user_id, text=delivery_text, parse_mode="HTML")
-    except Exception as e:
-        logger.error(f"Failed to deliver key to user {user_id}: {e}")
 
+    sent = True
     try:
-        await call.message.edit_caption(
-            caption=(
-                f"✅ <b>ORDER #{req_id} APPROVED & DELIVERED!</b>\n\n"
-                f"👤 Buyer: <code>{user_id}</code>\n"
-                f"📦 Product: {pkg['brand_name']} ({format_duration(pkg['duration_days'])})\n"
-                f"💵 Amount: ₹{req['amount_inr']:.2f}\n"
-                f"🔑 Delivered Key: <code>{key}</code>\n"
-                f"👑 Approved By: {call.from_user.full_name}"
-            ),
+        await bot.send_message(chat_id=target_uid, text=buyer_text, parse_mode="HTML")
+    except Exception as e:
+        sent = False
+        logger.error(f"Failed to deliver key to {target_uid}: {e}")
+
+    if sent:
+        await message.answer(
+            f"✅ <b>Key Successfully Delivered!</b>\n\n"
+            f"👤 <b>Buyer:</b> <code>{target_uid}</code>\n"
+            f"📦 <b>Package:</b> {pkg_str}\n"
+            f"🔑 <b>Delivered Key:</b> <code>{key_str}</code>\n"
+            f"🔖 <b>Order Ref:</b> <code>{order_info['order_ref']}</code>",
             parse_mode="HTML"
         )
-    except Exception:
-        pass
-    await call.answer("✅ Order Approved and Key Delivered!", show_alert=True)
+    else:
+        await message.answer(
+            f"⚠️ <b>Order recorded in database, but failed to DM user <code>{target_uid}</code>.</b>\n"
+            f"(User might have blocked or not started the bot).\n"
+            f"🔑 Key: <code>{key_str}</code>",
+            parse_mode="HTML"
+        )
 
+# Admin: Click "Send Key Now" on Order Notification
+@dp.callback_query(F.data.startswith("send_key_req_"))
+async def cb_admin_send_key_prompt(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        await call.answer("Unauthorized", show_alert=True)
+        return
+
+    req_id = int(call.data.replace("send_key_req_", ""))
+    conn = db.get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM direct_order_requests WHERE id = ? AND status = 'PENDING'", (req_id,))
+    req = c.fetchone()
+    conn.close()
+
+    if not req:
+        await call.answer("This order has already been processed!", show_alert=True)
+        return
+
+    await state.set_state(BotStates.admin_sending_key_for_req)
+    await state.update_data(req_id=req_id, user_id=req["user_id"])
+
+    await call.message.reply(
+        f"📝 <b>Order #{req_id}</b>\n"
+        f"👤 <b>Buyer ID:</b> <code>{req['user_id']}</code>\n"
+        f"💵 <b>Amount Due:</b> ₹{req['amount_inr']:.2f}\n\n"
+        "Send or reply with the <b>License Key</b> to deliver now:",
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+@dp.message(BotStates.admin_sending_key_for_req)
+async def process_admin_key_reply(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    req_id = data.get("req_id")
+    target_uid = data.get("user_id")
+    key_str = message.text.strip()
+    await state.clear()
+
+    order_info = db.deliver_manual_key(target_uid, key_str, req_id=req_id)
+    pkg = order_info.get("pkg")
+    pkg_str = f"{pkg['brand_name']} ({format_duration(pkg['duration_days'])})" if pkg else "VIP Panel License"
+
+    buyer_text = (
+        "🎉 <b>PAYMENT APPROVED & LICENSE DELIVERED!</b> 🎉\n\n"
+        f"📦 <b>Package:</b> {pkg_str}\n"
+        f"🆔 <b>Order Ref:</b> <code>{order_info['order_ref']}</code>\n\n"
+        f"🔑 <b>YOUR LICENSE KEY:</b>\n"
+        f"<code>{key_str}</code>\n"
+        "<i>(Tap to copy)</i>\n\n"
+        f"⬇️ <b>Download Channel:</b> {config.DOWNLOAD_CHANNEL_URL}\n"
+        f"🌐 <b>Support:</b> {config.SUPPORT_LINK}\n\n"
+        "✨ <i>Thank you for purchasing! Key is also saved in your All History menu.</i>"
+    )
+
+    try:
+        await bot.send_message(chat_id=target_uid, text=buyer_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Failed to deliver key to {target_uid}: {e}")
+
+    await message.answer(
+        f"✅ <b>ORDER #{req_id} APPROVED & DELIVERED!</b>\n\n"
+        f"👤 <b>Buyer:</b> <code>{target_uid}</code>\n"
+        f"📦 <b>Product:</b> {pkg_str}\n"
+        f"🔑 <b>Delivered Key:</b> <code>{key_str}</code>\n"
+        f"👑 <b>Admin:</b> {message.from_user.full_name}",
+        parse_mode="HTML"
+    )
+
+# Legacy / Direct Order Rejection
 @dp.callback_query(F.data.startswith("rejc_ord_"))
 async def cb_admin_reject_order(call: types.CallbackQuery):
     if call.from_user.id not in config.ADMIN_IDS:
@@ -1088,6 +1175,243 @@ async def process_broadcast(message: types.Message, state: FSMContext):
             pass
 
     await message.answer(f"✅ Broadcast finished! Sent to {sent}/{len(users)} users.")
+
+# ==========================================
+# 👑 DYNAMIC ADMIN FEATURES: PRICE & PACKAGE MANAGER
+# ==========================================
+
+@dp.callback_query(F.data == "menu_admin_home")
+async def cb_menu_admin_home(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.clear()
+    stats = db.get_stats()
+    admin_text = (
+        "👑 <b>ADMINISTRATION DASHBOARD</b> 👑\n\n"
+        f"👥 Total Users: <b>{stats['users']}</b>\n"
+        f"💰 Total User Balances: <b>₹{stats['balance']:.2f}</b>\n"
+        f"🛒 Completed Orders: <b>{stats['orders']}</b>\n"
+        f"💵 Total Revenue: <b>₹{stats['revenue']:.2f}</b>\n"
+        f"📦 Total Active Keys in Stock: <b>{stats['stock']}</b>\n\n"
+        "Choose an action below:"
+    )
+    try:
+        await call.message.edit_text(admin_text, reply_markup=kb.get_admin_main_keyboard(), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(admin_text, reply_markup=kb.get_admin_main_keyboard(), parse_mode="HTML")
+    await call.answer()
+
+# 1. Change Price Flow
+@dp.callback_query(F.data == "adm_change_price")
+async def cb_adm_change_price(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cats = db.get_categories()
+    text = "💰 <b>CHANGE PACKAGE PRICE</b>\n\nSelect a Category to browse brands & packages:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_categories_keyboard(cats, "adm_cat_price"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_cat_price_"))
+async def cb_adm_cat_price(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cat_id = int(call.data.replace("adm_cat_price_", ""))
+    brands = db.get_brands_by_category(cat_id)
+    text = "💰 <b>CHANGE PACKAGE PRICE</b>\n\nSelect a Brand:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_brands_keyboard(brands, cat_id, "adm_br_price"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_br_price_"))
+async def cb_adm_br_price(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    brand_id = int(call.data.replace("adm_br_price_", ""))
+    brand = db.get_brand(brand_id)
+    pkgs = db.get_packages_by_brand(brand_id)
+    bname = brand["name"] if brand else "Brand"
+    text = f"💰 <b>CHANGE PRICE FOR: {bname}</b>\n\nSelect the package you want to change price for:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_packages_keyboard(pkgs, brand_id), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_setprice_pkg_"))
+async def cb_adm_setprice_pkg(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    pkg_id = int(call.data.replace("adm_setprice_pkg_", ""))
+    pkg = db.get_package(pkg_id)
+    if not pkg:
+        await call.answer("Package not found!", show_alert=True)
+        return
+
+    dur = pkg.get("duration_label") or f"{pkg['duration_days']} Days"
+    await state.set_state(BotStates.admin_editing_price_input)
+    await state.update_data(pkg_id=pkg_id, brand_name=pkg["brand_name"], duration_str=dur, old_price=pkg["price_inr"])
+
+    prompt_text = (
+        f"✏️ <b>EDITING PRICE</b>\n\n"
+        f"📦 <b>Product:</b> {pkg['brand_name']}\n"
+        f"⏳ <b>Duration:</b> {dur}\n"
+        f"💵 <b>Current Price:</b> ₹{pkg['price_inr']:.2f}\n\n"
+        "Send the <b>New Price in ₹ INR</b> now (e.g. <code>85</code> or <code>150</code>):"
+    )
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_change_price")]
+    ])
+    await call.message.answer(prompt_text, reply_markup=cancel_kb, parse_mode="HTML")
+    await call.answer()
+
+@dp.message(BotStates.admin_editing_price_input)
+async def process_adm_new_price(message: types.Message, state: FSMContext):
+    try:
+        new_price = float(message.text.strip())
+        if new_price <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("❌ Please enter a valid positive number for the price (e.g. <code>99</code> or <code>150.00</code>):")
+        return
+
+    data = await state.get_data()
+    pkg_id = data["pkg_id"]
+    brand_name = data["brand_name"]
+    duration_str = data["duration_str"]
+    old_price = data["old_price"]
+    await state.clear()
+
+    db.update_package_price(pkg_id, new_price)
+
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="💰 Change Another Price", callback_data="adm_change_price")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+
+    await message.answer(
+        f"✅ <b>PRICE UPDATED SUCCESSFULLY!</b>\n\n"
+        f"📦 <b>Package:</b> {brand_name} ({duration_str})\n"
+        f"📉 <b>Old Price:</b> ₹{old_price:.2f}\n"
+        f"📈 <b>New Price:</b> <b>₹{new_price:.2f}</b>\n\n"
+        "<i>This new price is now immediately live in the bot!</i>",
+        reply_markup=back_kb,
+        parse_mode="HTML"
+    )
+
+# 2. Delete Package Flow
+@dp.callback_query(F.data == "adm_del_pkg")
+async def cb_adm_del_pkg(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cats = db.get_categories()
+    text = "🗑️ <b>DELETE PACKAGE</b>\n\nSelect Category to locate package:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_categories_keyboard(cats, "adm_cat_del"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_cat_del_"))
+async def cb_adm_cat_del(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cat_id = int(call.data.replace("adm_cat_del_", ""))
+    brands = db.get_brands_by_category(cat_id)
+    text = "🗑️ <b>DELETE PACKAGE</b>\n\nSelect Brand:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_brands_keyboard(brands, cat_id, "adm_br_del"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_br_del_"))
+async def cb_adm_br_del(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    brand_id = int(call.data.replace("adm_br_del_", ""))
+    brand = db.get_brand(brand_id)
+    pkgs = db.get_packages_by_brand(brand_id)
+    bname = brand["name"] if brand else "Brand"
+    text = f"🗑️ <b>DELETE PACKAGE FROM: {bname}</b>\n\nClick a package to permanently remove it:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_del_packages_keyboard(pkgs, brand_id), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_delpkg_conf_"))
+async def cb_adm_delpkg_conf(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    pkg_id = int(call.data.replace("adm_delpkg_conf_", ""))
+    pkg = db.get_package(pkg_id)
+    dur = pkg.get("duration_label") or f"{pkg['duration_days']} Days" if pkg else "Package"
+    bname = pkg["brand_name"] if pkg else ""
+    db.delete_package(pkg_id)
+
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🗑️ Delete Another", callback_data="adm_del_pkg")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await call.message.edit_text(
+        f"🗑️ <b>Package Deleted!</b>\n\nSuccessfully removed <b>{bname} ({dur})</b> from store.",
+        reply_markup=back_kb,
+        parse_mode="HTML"
+    )
+    await call.answer("Package Deleted!", show_alert=True)
+
+# 3. Interactive Send Key Prompt from Admin Menu
+@dp.callback_query(F.data == "adm_sendkey_prompt")
+async def cb_adm_sendkey_prompt(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.set_state(BotStates.admin_sending_key_userid)
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="menu_admin_home")]
+    ])
+    await call.message.answer(
+        "🔑 <b>MANUAL KEY DELIVERY</b>\n\n"
+        "Send the <b>User ID</b> of the buyer (or use <code>/sendkey &lt;user_id&gt; &lt;key&gt;</code> directly):",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+@dp.message(BotStates.admin_sending_key_userid)
+async def process_adm_key_userid(message: types.Message, state: FSMContext):
+    try:
+        target_uid = int(message.text.strip())
+    except ValueError:
+        await message.answer("❌ Invalid User ID! Please send a numeric User ID:")
+        return
+
+    await state.update_data(target_uid=target_uid)
+    await state.set_state(BotStates.admin_sending_key_text)
+    await message.answer(f"📝 Now send the <b>License Key</b> to deliver to <code>{target_uid}</code>:", parse_mode="HTML")
+
+@dp.message(BotStates.admin_sending_key_text)
+async def process_adm_key_text(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    target_uid = data["target_uid"]
+    key_str = message.text.strip()
+    await state.clear()
+
+    order_info = db.deliver_manual_key(target_uid, key_str)
+    pkg = order_info.get("pkg")
+    pkg_str = f"{pkg['brand_name']} ({format_duration(pkg['duration_days'])})" if pkg else "VIP Panel License"
+
+    buyer_text = (
+        "🎉 <b>PAYMENT APPROVED & LICENSE DELIVERED!</b> 🎉\n\n"
+        f"📦 <b>Package:</b> {pkg_str}\n"
+        f"🆔 <b>Order Ref:</b> <code>{order_info['order_ref']}</code>\n\n"
+        f"🔑 <b>YOUR LICENSE KEY:</b>\n"
+        f"<code>{key_str}</code>\n"
+        "<i>(Tap to copy)</i>\n\n"
+        f"⬇️ <b>Download Channel:</b> {config.DOWNLOAD_CHANNEL_URL}\n"
+        f"🌐 <b>Support:</b> {config.SUPPORT_LINK}\n\n"
+        "✨ <i>Thank you for purchasing! Key is also saved in your All History menu.</i>"
+    )
+
+    try:
+        await bot.send_message(chat_id=target_uid, text=buyer_text, parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Failed to deliver key to {target_uid}: {e}")
+
+    await message.answer(
+        f"✅ <b>Key Successfully Delivered!</b>\n\n"
+        f"👤 <b>Buyer:</b> <code>{target_uid}</code>\n"
+        f"📦 <b>Package:</b> {pkg_str}\n"
+        f"🔑 <b>Key:</b> <code>{key_str}</code>\n"
+        f"🔖 <b>Order Ref:</b> <code>{order_info['order_ref']}</code>",
+        parse_mode="HTML"
+    )
 
 # ==========================================
 # 🚀 MAIN ENTRYPOINT
