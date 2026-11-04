@@ -248,7 +248,12 @@ def get_admin_brands_keyboard(brands: list, cat_id: int, action_prefix: str = "a
     for brand in brands:
         icon = brand.get("icon") or "🛒"
         keyboard.append([InlineKeyboardButton(text=f"{icon} {brand['name']}", callback_data=f"{action_prefix}_{brand['id']}")])
-    back_target = "adm_change_price" if action_prefix == "adm_br_price" else "adm_del_pkg"
+    if action_prefix == "adm_br_price":
+        back_target = "adm_change_price"
+    elif action_prefix == "adm_br_stock":
+        back_target = "adm_add_keys"
+    else:
+        back_target = "adm_del_pkg"
     keyboard.append([InlineKeyboardButton(text="🔙 Back to Categories", callback_data=back_target)])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
@@ -261,6 +266,18 @@ def get_admin_packages_keyboard(packages: list, brand_id: int) -> InlineKeyboard
     brand = db.get_brand(brand_id)
     cat_id = brand["category_id"] if brand else 1
     keyboard.append([InlineKeyboardButton(text="🔙 Back to Brands", callback_data=f"adm_cat_price_{cat_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_stock_packages_keyboard(packages: list, brand_id: int) -> InlineKeyboardMarkup:
+    keyboard = []
+    for pkg in packages:
+        dur = pkg.get("duration_label") or f"{pkg['duration_days']} Days"
+        stock = db.get_stock_count(pkg["id"])
+        text = f"📦 {dur} (Stock: {stock})"
+        keyboard.append([InlineKeyboardButton(text=text, callback_data=f"adm_sel_pkg_stock_{pkg['id']}")])
+    brand = db.get_brand(brand_id)
+    cat_id = brand["category_id"] if brand else 1
+    keyboard.append([InlineKeyboardButton(text="🔙 Back to Brands", callback_data=f"adm_cat_stock_{cat_id}")])
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_admin_del_packages_keyboard(packages: list, brand_id: int) -> InlineKeyboardMarkup:

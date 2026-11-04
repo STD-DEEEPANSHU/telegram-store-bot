@@ -577,13 +577,16 @@ def get_stats():
     o_stats = c.fetchone()
     c.execute("SELECT COUNT(*) as available_keys FROM keys_stock WHERE is_used = 0")
     k_stats = c.fetchone()
+    c.execute("SELECT COUNT(*) as used_keys FROM keys_stock WHERE is_used = 1")
+    used_k = c.fetchone()
     conn.close()
     return {
         "users": u_stats["total_users"] or 0,
         "balance": u_stats["total_balance"] or 0.0,
         "orders": o_stats["total_orders"] or 0,
         "revenue": o_stats["total_revenue"] or 0.0,
-        "stock": k_stats["available_keys"] or 0
+        "stock": k_stats["available_keys"] or 0,
+        "sold_keys": used_k["used_keys"] or 0
     }
 
 def seed_default_data():

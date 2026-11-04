@@ -1075,48 +1075,138 @@ async def cb_admin_reject_order(call: types.CallbackQuery):
         pass
     await call.answer("❌ Order Rejected.", show_alert=True)
 
-# Admin: Add Stock
+# ==========================================
+# 📊 ADMIN: BOT ANALYTICS
+# ==========================================
+
+@dp.callback_query(F.data == "adm_stats")
+async def cb_adm_stats(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        await call.answer("Unauthorized", show_alert=True)
+        return
+
+    stats = db.get_stats()
+    custom_btns = db.get_custom_buttons(active_only=False)
+    custom_cmds = db.get_custom_commands()
+
+    stats_text = (
+        "📊 <b>DETAILED BOT ANALYTICS & METRICS</b> 📊\n\n"
+        "👥 <b>Users & Wallet:</b>\n"
+        f"• Total Registered Users: <b>{stats['users']}</b>\n"
+        f"• Total User Balances: <b>₹{stats['balance']:.2f}</b>\n\n"
+        "🛒 <b>Sales & Revenue:</b>\n"
+        f"• Total Completed Orders: <b>{stats['orders']}</b>\n"
+        f"• Total Store Revenue: <b>₹{stats['revenue']:.2f}</b>\n\n"
+        "📦 <b>Inventory & Keys:</b>\n"
+        f"• Active Keys in Stock: <b>{stats['stock']}</b>\n"
+        f"• Keys Delivered / Sold: <b>{stats.get('sold_keys', 0)}</b>\n\n"
+        "⚡ <b>Custom Engine:</b>\n"
+        f"• Active Custom Buttons: <b>{len(custom_btns)}</b>\n"
+        f"• Dynamic /Commands: <b>{len(custom_cmds)}</b>\n\n"
+        "✨ <i>All metrics updated in real-time from database.</i>"
+    )
+
+    stats_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔄 Refresh", callback_data="adm_stats")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+
+    try:
+        await call.message.edit_text(stats_text, reply_markup=stats_kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(stats_text, reply_markup=stats_kb, parse_mode="HTML")
+    await call.answer()
+
+# ==========================================
+# 📦 ADMIN: ADD STOCK KEYS (INTERACTIVE NAV)
+# ==========================================
+
 @dp.callback_query(F.data == "adm_add_keys")
 async def cb_adm_add_keys(call: types.CallbackQuery, state: FSMContext):
     if call.from_user.id not in config.ADMIN_IDS:
         return
-    conn = db.get_connection()
-    c = conn.cursor()
-    c.execute("""
-        SELECT p.id, b.name as brand, p.duration_days 
-        FROM packages p 
-        JOIN brands b ON p.brand_id = b.id
-    """)
-    pkgs = c.fetchall()
-    conn.close()
-
-    text = "📦 <b>Select package ID to add license keys to:</b>\n\n"
-    for p in pkgs:
-        text += f"ID: <code>{p['id']}</code> ➔ {p['brand']} ({format_duration(p['duration_days'])})\n"
-    text += "\nSend the <b>Package ID</b> now:"
-    await state.set_state(BotStates.admin_adding_keys_pkg)
-    await call.message.answer(text, parse_mode="HTML")
+    await state.clear()
+    cats = db.get_categories()
+    text = "📦 <b>ADD STOCK KEYS</b>\n\nSelect a Category to browse brands & packages:"
+    try:
+        await call.message.edit_text(text, reply_markup=kb.get_admin_categories_keyboard(cats, "adm_cat_stock"), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb.get_admin_categories_keyboard(cats, "adm_cat_stock"), parse_mode="HTML")
     await call.answer()
 
-@dp.message(BotStates.admin_adding_keys_pkg)
-async def process_adm_pkg_id(message: types.Message, state: FSMContext):
-    try:
-        pkg_id = int(message.text.strip())
-    except ValueError:
-        await message.answer("Please enter a valid numeric Package ID:")
+@dp.callback_query(F.data.startswith("adm_cat_stock_"))
+async def cb_adm_cat_stock(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
         return
-    await state.update_data(pkg_id=pkg_id)
+    cat_id = int(call.data.replace("adm_cat_stock_", ""))
+    brands = db.get_brands_by_category(cat_id)
+    text = "📦 <b>ADD STOCK KEYS</b>\n\nSelect a Brand:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_brands_keyboard(brands, cat_id, "adm_br_stock"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_br_stock_"))
+async def cb_adm_br_stock(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    brand_id = int(call.data.replace("adm_br_stock_", ""))
+    brand = db.get_brand(brand_id)
+    pkgs = db.get_packages_by_brand(brand_id)
+    bname = brand["name"] if brand else "Brand"
+    text = f"📦 <b>ADD STOCK KEYS FOR: {bname}</b>\n\nSelect the package you want to add license keys to:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_stock_packages_keyboard(pkgs, brand_id), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_sel_pkg_stock_"))
+async def cb_adm_sel_pkg_stock(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    pkg_id = int(call.data.replace("adm_sel_pkg_stock_", ""))
+    pkg = db.get_package(pkg_id)
+    if not pkg:
+        await call.answer("Package not found!", show_alert=True)
+        return
+
+    dur = pkg.get("duration_label") or f"{pkg['duration_days']} Days"
+    current_stock = db.get_stock_count(pkg_id)
+
     await state.set_state(BotStates.admin_adding_keys_input)
-    await message.answer("📝 Send the keys now (one key per line):")
+    await state.update_data(pkg_id=pkg_id, brand_name=pkg.get("brand_name", "Package"), dur_str=dur)
+
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_add_keys")]
+    ])
+    prompt_text = (
+        "📦 <b>ADDING KEYS TO PACKAGE</b>\n\n"
+        f"• <b>Product:</b> {pkg.get('brand_name')}\n"
+        f"• <b>Duration:</b> {dur}\n"
+        f"• <b>Current Stock:</b> {current_stock} keys\n\n"
+        "📝 Send the <b>License Keys</b> now (one key per line):"
+    )
+    await call.message.answer(prompt_text, reply_markup=cancel_kb, parse_mode="HTML")
+    await call.answer()
 
 @dp.message(BotStates.admin_adding_keys_input)
 async def process_adm_keys_list(message: types.Message, state: FSMContext):
     data = await state.get_data()
-    pkg_id = data["pkg_id"]
-    keys = message.text.strip().split("\n")
+    pkg_id = data.get("pkg_id")
+    brand_name = data.get("brand_name", f"Package ID {pkg_id}")
+    dur_str = data.get("dur_str", "")
+    keys = [k.strip() for k in message.text.strip().split("\n") if k.strip()]
     inserted = db.add_keys_bulk(pkg_id, keys)
+    new_total = db.get_stock_count(pkg_id)
     await state.clear()
-    await message.answer(f"✅ Successfully added <b>{inserted}</b> keys to Package ID {pkg_id}!", parse_mode="HTML")
+
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📦 Add More Keys", callback_data="adm_add_keys")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await message.answer(
+        f"✅ <b>Successfully added {inserted} keys!</b>\n\n"
+        f"• <b>Product:</b> {brand_name} ({dur_str})\n"
+        f"• <b>Total Stock Now:</b> {new_total} keys",
+        reply_markup=back_kb,
+        parse_mode="HTML"
+    )
 
 # Admin: Credit User Balance
 @dp.callback_query(F.data == "adm_add_bal")
