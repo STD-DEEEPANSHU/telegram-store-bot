@@ -139,11 +139,44 @@ def init_db():
     )
     """)
 
+    # Dynamic Bot Settings (Key-Value: texts, links, upi, etc.)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS bot_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT,
+        description TEXT
+    )
+    """)
+
+    # Dynamic Custom Buttons (Main menu buttons)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS custom_buttons (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        button_text TEXT NOT NULL,
+        button_type TEXT NOT NULL,
+        button_value TEXT NOT NULL,
+        row_position INTEGER DEFAULT 1,
+        is_active INTEGER DEFAULT 1
+    )
+    """)
+
+    # Dynamic Custom Commands (/rules, /help, /apk, etc.)
+    c.execute("""
+    CREATE TABLE IF NOT EXISTS custom_commands (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        command TEXT UNIQUE NOT NULL,
+        response_text TEXT NOT NULL,
+        description TEXT DEFAULT ''
+    )
+    """)
+
     conn.commit()
     conn.close()
 
     # Seed initial categories and packages if empty
     seed_default_data()
+    # Seed default dynamic settings if empty
+    seed_default_settings()
 
 def get_or_create_user(user_id, username, full_name, referrer_id=None):
     conn = get_connection()
@@ -636,3 +669,206 @@ def seed_default_data():
 
     conn.commit()
     conn.close()
+
+def seed_default_settings():
+    conn = get_connection()
+    c = conn.cursor()
+    default_settings = [
+        ("store_name", "FF PANEL STORE", "Display name of the store"),
+        ("store_tagline", "Official Gaming Panels & Instant Key Delivery", "Store tagline"),
+        ("welcome_msg", (
+            "⚡ <b>{store_name}</b> ⚡\n"
+            "<i>{store_tagline}</i>\n\n"
+            "👋 <b>Welcome to the Store!</b>\n"
+            "<i>Instant automated delivery & 24/7 active services.</i>\n\n"
+            "❖ <b>NAVIGATION MENU</b> ❖\n"
+            "┣ 🛒 <b>Product Store</b> ➔ <i>Instant key delivery</i>\n"
+            "┣ 💰 <b>Add Balance</b> ➔ <i>UPI • Crypto • bKash</i>\n"
+            "┣ 👤 <b>My Profile</b> ➔ <i>Account & live wallet</i>\n"
+            "┣ 🔑 <b>All History</b> ➔ <i>Past orders & keys</i>\n"
+            "┣ 👥 <b>Referral System</b> ➔ <i>Earn 15% bonus</i>\n"
+            "┣ 🎵 <b>STD Music APK</b> ➔ <i>Official music app download</i>\n"
+            "┣ ⬇️ <b>Download Files</b> ➔ <i>Verified safe APKs</i>\n"
+            "┣ 🎬 <b>Tutorials</b> ➔ <i>Bot usage & video guide</i>\n"
+            "┗ 🌐 <b>Helpdesk</b> ➔ <i>Live customer support</i>\n\n"
+            "✨ <b>Fast • Automated • 100% Reliable</b>"
+        ), "Main welcome text for /start"),
+        ("support_link", "https://t.me/kartik_owner", "Telegram support link or username"),
+        ("download_channel_url", "https://t.me/kartik_channel", "Download channel URL"),
+        ("music_app_url", "https://stdmusicapp-f82ba5b47ed8.herokuapp.com/static/STD_MUSIC.apk", "Music App download URL"),
+        ("tutorial_video_url", "https://youtu.be/dQw4w9WgXcQ", "Tutorial video URL"),
+        ("paytm_upi_id", "8449767748@ptaxis", "Paytm UPI ID for direct checkout"),
+        ("payee_name", "STD Store", "Payee display name on UPI QR")
+    ]
+
+    for key, val, desc in default_settings:
+        c.execute("INSERT OR IGNORE INTO bot_settings (key, value, description) VALUES (?, ?, ?)", (key, val, desc))
+
+    # Add default /rules command if not existing
+    c.execute("SELECT COUNT(*) as cnt FROM custom_commands WHERE command = 'rules'")
+    if c.fetchone()["cnt"] == 0:
+        c.execute("""
+            INSERT INTO custom_commands (command, response_text, description)
+            VALUES (?, ?, ?)
+        """, (
+            "rules",
+            "📜 <b>STORE RULES & POLICY</b>\n\n1. Do not share your license key with multiple unauthorized devices.\n2. All delivered keys are tested and verified before delivery.\n3. For any billing or key issues, contact our support team.",
+            "Store rules and policy"
+        ))
+
+    conn.commit()
+    conn.close()
+
+# ==========================================
+# ⚙️ BOT SETTINGS & CONFIGURATION
+# ==========================================
+
+def get_setting(key: str, default=None) -> str:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT value FROM bot_settings WHERE key = ?", (key,))
+    row = c.fetchone()
+    conn.close()
+    if row and row["value"] is not None:
+        return row["value"]
+    return default
+
+def set_setting(key: str, value: str, description: str = ""):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO bot_settings (key, value, description)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    """, (key, value, description))
+    conn.commit()
+    conn.close()
+
+def get_all_settings() -> dict:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT key, value, description FROM bot_settings")
+    rows = c.fetchall()
+    conn.close()
+    return {r["key"]: r["value"] for r in rows}
+
+# ==========================================
+# 🔘 DYNAMIC CUSTOM BUTTONS
+# ==========================================
+
+def get_custom_buttons(active_only=True) -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    if active_only:
+        c.execute("SELECT * FROM custom_buttons WHERE is_active = 1 ORDER BY row_position ASC, id ASC")
+    else:
+        c.execute("SELECT * FROM custom_buttons ORDER BY row_position ASC, id ASC")
+    rows = c.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_custom_button(button_id: int):
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM custom_buttons WHERE id = ?", (button_id,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def add_custom_button(button_text: str, button_type: str, button_value: str, row_position: int = 1) -> int:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO custom_buttons (button_text, button_type, button_value, row_position, is_active)
+        VALUES (?, ?, ?, ?, 1)
+    """, (button_text, button_type, button_value, row_position))
+    btn_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return btn_id
+
+def delete_custom_button(button_id: int) -> bool:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM custom_buttons WHERE id = ?", (button_id,))
+    changes = conn.total_changes
+    conn.commit()
+    conn.close()
+    return changes > 0
+
+# ==========================================
+# ⚡ DYNAMIC CUSTOM COMMANDS
+# ==========================================
+
+def get_custom_commands() -> list:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM custom_commands ORDER BY command ASC")
+    rows = c.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_custom_command(cmd_name: str):
+    cmd_clean = cmd_name.strip().lstrip("/").lower()
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("SELECT * FROM custom_commands WHERE LOWER(command) = ?", (cmd_clean,))
+    row = c.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def set_custom_command(cmd_name: str, response_text: str, description: str = ""):
+    cmd_clean = cmd_name.strip().lstrip("/").lower()
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO custom_commands (command, response_text, description)
+        VALUES (?, ?, ?)
+        ON CONFLICT(command) DO UPDATE SET response_text = excluded.response_text
+    """, (cmd_clean, response_text, description))
+    conn.commit()
+    conn.close()
+
+def delete_custom_command(cmd_name: str) -> bool:
+    cmd_clean = cmd_name.strip().lstrip("/").lower()
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM custom_commands WHERE LOWER(command) = ?", (cmd_clean,))
+    changes = conn.total_changes
+    conn.commit()
+    conn.close()
+    return changes > 0
+
+# ==========================================
+# 🏷️ BRAND & PACKAGE CREATION / DELETION
+# ==========================================
+
+def add_brand(category_id: int, name: str, icon: str = "🛒") -> int:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("INSERT INTO brands (category_id, name, icon) VALUES (?, ?, ?)", (category_id, name, icon))
+    bid = c.lastrowid
+    conn.commit()
+    conn.close()
+    return bid
+
+def delete_brand(brand_id: int) -> bool:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("DELETE FROM packages WHERE brand_id = ?", (brand_id,))
+    c.execute("DELETE FROM brands WHERE id = ?", (brand_id,))
+    conn.commit()
+    conn.close()
+    return True
+
+def add_package(brand_id: int, duration_days: float, price_inr: float, duration_label: str = None, hwid_device: int = 1) -> int:
+    conn = get_connection()
+    c = conn.cursor()
+    c.execute("""
+        INSERT INTO packages (brand_id, duration_days, duration_label, price_inr, hwid_device)
+        VALUES (?, ?, ?, ?, ?)
+    """, (brand_id, duration_days, duration_label, price_inr, hwid_device))
+    pkg_id = c.lastrowid
+    conn.commit()
+    conn.close()
+    return pkg_id

@@ -2,7 +2,7 @@ import asyncio
 import logging
 import time
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -40,6 +40,18 @@ class BotStates(StatesGroup):
     admin_sending_key_for_req = State()
     admin_editing_price_input = State()
 
+    # Dynamic Custom Admin States
+    admin_editing_setting_val = State()
+    admin_adding_cbtn_text = State()
+    admin_adding_cbtn_val = State()
+    admin_adding_ccmd_name = State()
+    admin_adding_ccmd_reply = State()
+    admin_adding_br_name = State()
+    admin_adding_br_icon = State()
+    admin_adding_pkg_days = State()
+    admin_adding_pkg_label = State()
+    admin_adding_pkg_price = State()
+
 # ==========================================
 # 🌟 /start & MAIN NAVIGATION
 # ==========================================
@@ -62,10 +74,27 @@ def format_duration(pkg_or_days) -> str:
     except (ValueError, TypeError):
         return str(days)
 
+def get_support_link() -> str:
+    raw = db.get_setting("support_link", config.SUPPORT_LINK)
+    if raw.startswith("http") or raw.startswith("@"):
+        return raw if raw.startswith("http") else f"https://t.me/{raw.replace('@', '')}"
+    return f"https://t.me/{raw}"
+
+def get_download_channel_url() -> str:
+    return db.get_setting("download_channel_url", config.DOWNLOAD_CHANNEL_URL)
+
 def get_welcome_text() -> str:
+    raw_template = db.get_setting("welcome_msg")
+    store_name = db.get_setting("store_name", config.STORE_NAME)
+    store_tagline = db.get_setting("store_tagline", config.STORE_TAGLINE)
+    if raw_template:
+        try:
+            return raw_template.format(store_name=store_name, store_tagline=store_tagline)
+        except Exception:
+            return raw_template
     return (
-        f"⚡ <b>{config.STORE_NAME}</b> ⚡\n"
-        f"<i>{config.STORE_TAGLINE}</i>\n\n"
+        f"⚡ <b>{store_name}</b> ⚡\n"
+        f"<i>{store_tagline}</i>\n\n"
         "👋 <b>Welcome to the Store!</b>\n"
         "<i>Instant automated delivery & 24/7 active services.</i>\n\n"
         "❖ <b>NAVIGATION MENU</b> ❖\n"
@@ -108,6 +137,29 @@ async def cb_menu_home(call: types.CallbackQuery, state: FSMContext):
     except Exception:
         await call.message.delete()
         await call.message.answer(get_welcome_text(), reply_markup=kb.get_main_menu_keyboard(), parse_mode="HTML")
+    await call.answer()
+
+# Custom Dynamic Button Callback Handler
+@dp.callback_query(F.data.startswith("cbtn_"))
+async def cb_custom_button(call: types.CallbackQuery):
+    try:
+        btn_id = int(call.data.replace("cbtn_", ""))
+    except ValueError:
+        await call.answer()
+        return
+
+    btn = db.get_custom_button(btn_id)
+    if not btn:
+        await call.answer("Button not found or expired!", show_alert=True)
+        return
+
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Back to Menu", callback_data="menu_home")]
+    ])
+    try:
+        await call.message.edit_text(btn["button_value"], reply_markup=back_kb, parse_mode="HTML")
+    except Exception:
+        await call.message.answer(btn["button_value"], reply_markup=back_kb, parse_mode="HTML")
     await call.answer()
 
 # ==========================================
@@ -462,7 +514,7 @@ async def cb_buy_package(call: types.CallbackQuery):
             f"🔑 <b>YOUR LICENSE KEY:</b>\n"
             f"<code>{key}</code>\n"
             "<i>(Tap to copy)</i>\n\n"
-            f"⬇️ <b>Download Files:</b> {config.DOWNLOAD_CHANNEL_URL}\n\n"
+            f"⬇️ <b>Download Files:</b> {get_download_channel_url()}\n\n"
             "✨ <i>Thank you for shopping with us!</i>"
         )
         back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
@@ -886,8 +938,8 @@ async def cmd_sendkey(message: types.Message):
         f"🔑 <b>YOUR LICENSE KEY:</b>\n"
         f"<code>{key_str}</code>\n"
         "<i>(Tap to copy)</i>\n\n"
-        f"⬇️ <b>Download Channel:</b> {config.DOWNLOAD_CHANNEL_URL}\n"
-        f"🌐 <b>Support:</b> {config.SUPPORT_LINK}\n\n"
+        f"⬇️ <b>Download Channel:</b> {get_download_channel_url()}\n"
+        f"🌐 <b>Support:</b> {get_support_link()}\n\n"
         "✨ <i>Thank you for purchasing! Key is also saved in your All History menu.</i>"
     )
 
@@ -964,8 +1016,8 @@ async def process_admin_key_reply(message: types.Message, state: FSMContext):
         f"🔑 <b>YOUR LICENSE KEY:</b>\n"
         f"<code>{key_str}</code>\n"
         "<i>(Tap to copy)</i>\n\n"
-        f"⬇️ <b>Download Channel:</b> {config.DOWNLOAD_CHANNEL_URL}\n"
-        f"🌐 <b>Support:</b> {config.SUPPORT_LINK}\n\n"
+        f"⬇️ <b>Download Channel:</b> {get_download_channel_url()}\n"
+        f"🌐 <b>Support:</b> {get_support_link()}\n\n"
         "✨ <i>Thank you for purchasing! Key is also saved in your All History menu.</i>"
     )
 
@@ -1001,7 +1053,7 @@ async def cb_admin_reject_order(call: types.CallbackQuery):
         f"🆔 <b>Order Ref:</b> <code>{req['order_ref']}</code>\n"
         f"💵 <b>Amount:</b> ₹{req['amount_inr']:.2f}\n\n"
         "Your payment screenshot could not be verified by Admin.\n"
-        f"If you believe this is an error, please reach out to Support: {config.SUPPORT_LINK}"
+        f"If you believe this is an error, please reach out to Support: {get_support_link()}"
     )
     try:
         await bot.send_message(chat_id=user_id, text=reject_text, parse_mode="HTML")
@@ -1394,8 +1446,8 @@ async def process_adm_key_text(message: types.Message, state: FSMContext):
         f"🔑 <b>YOUR LICENSE KEY:</b>\n"
         f"<code>{key_str}</code>\n"
         "<i>(Tap to copy)</i>\n\n"
-        f"⬇️ <b>Download Channel:</b> {config.DOWNLOAD_CHANNEL_URL}\n"
-        f"🌐 <b>Support:</b> {config.SUPPORT_LINK}\n\n"
+        f"⬇️ <b>Download Channel:</b> {get_download_channel_url()}\n"
+        f"🌐 <b>Support:</b> {get_support_link()}\n\n"
         "✨ <i>Thank you for purchasing! Key is also saved in your All History menu.</i>"
     )
 
@@ -1412,6 +1464,521 @@ async def process_adm_key_text(message: types.Message, state: FSMContext):
         f"🔖 <b>Order Ref:</b> <code>{order_info['order_ref']}</code>",
         parse_mode="HTML"
     )
+
+# ==========================================
+# ⚙️ ADMIN: TEXTS & LINKS MANAGER
+# ==========================================
+
+@dp.callback_query(F.data == "adm_manage_texts")
+async def cb_adm_manage_texts(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.clear()
+    s = db.get_all_settings()
+    text = (
+        "📝 <b>EDIT BOT TEXTS & LINKS</b>\n\n"
+        f"• <b>Store Name:</b> <code>{s.get('store_name', config.STORE_NAME)}</code>\n"
+        f"• <b>Support:</b> <code>{s.get('support_link', config.SUPPORT_LINK)}</code>\n"
+        f"• <b>Download Channel:</b> <code>{s.get('download_channel_url', config.DOWNLOAD_CHANNEL_URL)}</code>\n"
+        f"• <b>Music App URL:</b> <code>{s.get('music_app_url', '')}</code>\n"
+        f"• <b>Tutorial Video:</b> <code>{s.get('tutorial_video_url', '')}</code>\n"
+        f"• <b>Paytm UPI ID:</b> <code>{s.get('paytm_upi_id', '')}</code>\n"
+        f"• <b>Payee Name:</b> <code>{s.get('payee_name', '')}</code>\n\n"
+        "<i>Click an option below to update its value:</i>"
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=kb.get_admin_texts_keyboard(), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb.get_admin_texts_keyboard(), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_edit_txt_"))
+async def cb_adm_edit_setting(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    setting_key = call.data.replace("adm_edit_txt_", "")
+    await state.set_state(BotStates.admin_editing_setting_val)
+    await state.update_data(setting_key=setting_key)
+
+    cur_val = db.get_setting(setting_key, "")
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_texts")]
+    ])
+
+    names_map = {
+        "welcome_msg": "Welcome Message (/start text)",
+        "support_link": "Telegram Support Link",
+        "download_channel_url": "Download Channel URL",
+        "music_app_url": "STD Music App APK Link",
+        "tutorial_video_url": "Tutorial Video Link",
+        "paytm_upi_id": "Paytm UPI ID (e.g. 8449767748@ptaxis)",
+        "payee_name": "Payee Name (e.g. STD Store)",
+        "store_name": "Store Name",
+        "store_tagline": "Store Tagline"
+    }
+    label = names_map.get(setting_key, setting_key)
+
+    await call.message.answer(
+        f"✏️ <b>Updating:</b> {label}\n\n"
+        f"<b>Current Value:</b>\n<code>{cur_val}</code>\n\n"
+        "Send the <b>New Value</b> now (supports HTML):",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+@dp.message(BotStates.admin_editing_setting_val)
+async def process_adm_setting_new_val(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    setting_key = data.get("setting_key")
+    new_val = message.text.strip()
+    await state.clear()
+
+    db.set_setting(setting_key, new_val)
+
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📝 Edit Another Setting", callback_data="adm_manage_texts")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await message.answer(
+        f"✅ <b>Successfully updated {setting_key}!</b>\n\n"
+        f"<b>New Value:</b>\n{new_val}",
+        reply_markup=back_kb,
+        parse_mode="HTML"
+    )
+
+# ==========================================
+# 🔘 ADMIN: CUSTOM BUTTONS MANAGER
+# ==========================================
+
+@dp.callback_query(F.data == "adm_manage_buttons")
+async def cb_adm_manage_buttons(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.clear()
+    btns = db.get_custom_buttons(active_only=False)
+    text = (
+        "🔘 <b>CUSTOM BUTTONS MANAGER</b>\n\n"
+        "Here you can create custom buttons for the main menu that either open external links or display custom messages:\n\n"
+    )
+    if btns:
+        for b in btns:
+            text += f"• <b>{b['button_text']}</b> [{b['button_type'].upper()}] ➔ <code>{b['button_value'][:30]}...</code>\n"
+    else:
+        text += "<i>No custom buttons created yet.</i>\n"
+
+    try:
+        await call.message.edit_text(text, reply_markup=kb.get_admin_buttons_keyboard(btns), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb.get_admin_buttons_keyboard(btns), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data == "adm_add_cbtn_start")
+async def cb_adm_add_cbtn_start(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.set_state(BotStates.admin_adding_cbtn_text)
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_buttons")]
+    ])
+    await call.message.answer(
+        "➕ <b>CREATE NEW BUTTON</b>\n\n"
+        "Send the <b>Button Label/Name</b> (e.g. <code>🎁 Free Bonus</code> or <code>💬 Discussion Group</code>):",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+@dp.message(BotStates.admin_adding_cbtn_text)
+async def process_adm_cbtn_text(message: types.Message, state: FSMContext):
+    btn_text = message.text.strip()
+    await state.update_data(btn_text=btn_text)
+
+    type_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔗 Open Website / Channel (URL)", callback_data="adm_cbtntype_url")],
+        [types.InlineKeyboardButton(text="💬 Send Text Message (Popup)", callback_data="adm_cbtntype_text")],
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_buttons")]
+    ])
+    await message.answer(
+        f"🏷️ Button Name: <b>{btn_text}</b>\n\n"
+        "What should happen when users tap this button?",
+        reply_markup=type_kb,
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("adm_cbtntype_"))
+async def cb_adm_cbtn_type(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    b_type = call.data.replace("adm_cbtntype_", "")
+    await state.update_data(btn_type=b_type)
+    await state.set_state(BotStates.admin_adding_cbtn_val)
+
+    if b_type == "url":
+        prompt = "🔗 Send the <b>Full Link / URL</b> (e.g. <code>https://t.me/your_channel</code> or <code>https://mysite.com</code>):"
+    else:
+        prompt = "💬 Send the <b>Text Message</b> that the bot should show when user taps this button (supports HTML):"
+
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_buttons")]
+    ])
+    await call.message.edit_text(prompt, reply_markup=cancel_kb, parse_mode="HTML")
+    await call.answer()
+
+@dp.message(BotStates.admin_adding_cbtn_val)
+async def process_adm_cbtn_val(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    btn_text = data.get("btn_text", "Button")
+    btn_type = data.get("btn_type", "url")
+    btn_val = message.text.strip()
+    await state.clear()
+
+    db.add_custom_button(btn_text, btn_type, btn_val)
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔘 View Buttons", callback_data="adm_manage_buttons")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await message.answer(
+        f"✅ <b>Button Created Successfully!</b>\n\n"
+        f"• Label: <b>{btn_text}</b>\n"
+        f"• Type: <b>{btn_type.upper()}</b>\n"
+        f"• Target: <code>{btn_val}</code>\n\n"
+        "<i>This button is now active in the Main Menu!</i>",
+        reply_markup=back_kb,
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("adm_del_cbtn_"))
+async def cb_adm_del_cbtn(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    btn_id = int(call.data.replace("adm_del_cbtn_", ""))
+    db.delete_custom_button(btn_id)
+    await call.answer("Button deleted!", show_alert=True)
+    btns = db.get_custom_buttons(active_only=False)
+    await call.message.edit_reply_markup(reply_markup=kb.get_admin_buttons_keyboard(btns))
+
+@dp.callback_query(F.data.startswith("adm_view_cbtn_"))
+async def cb_adm_view_cbtn(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    btn_id = int(call.data.replace("adm_view_cbtn_", ""))
+    b = db.get_custom_button(btn_id)
+    if b:
+        await call.answer(f"[{b['button_type'].upper()}]\n{b['button_value'][:100]}", show_alert=True)
+    else:
+        await call.answer("Button not found!", show_alert=True)
+
+# ==========================================
+# ⚡ ADMIN: CUSTOM COMMANDS MANAGER
+# ==========================================
+
+@dp.callback_query(F.data == "adm_manage_commands")
+async def cb_adm_manage_commands(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.clear()
+    cmds = db.get_custom_commands()
+    text = (
+        "⚡ <b>CUSTOM COMMANDS MANAGER</b>\n\n"
+        "Create custom bot commands like <code>/rules</code>, <code>/upi</code>, <code>/help</code> without touching code.\n\n"
+    )
+    if cmds:
+        for c in cmds:
+            text += f"• <b>/{c['command']}</b> ➔ <i>{c['response_text'][:35]}...</i>\n"
+    else:
+        text += "<i>No custom commands registered yet.</i>\n"
+
+    try:
+        await call.message.edit_text(text, reply_markup=kb.get_admin_commands_keyboard(cmds), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb.get_admin_commands_keyboard(cmds), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data == "adm_add_ccmd_start")
+async def cb_adm_add_ccmd_start(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.set_state(BotStates.admin_adding_ccmd_name)
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_commands")]
+    ])
+    await call.message.answer(
+        "⚡ <b>CREATE NEW COMMAND</b>\n\n"
+        "Send the <b>Command Name</b> without slash (e.g. <code>contact</code>, <code>discount</code>, <code>rules</code>):",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+@dp.message(BotStates.admin_adding_ccmd_name)
+async def process_adm_ccmd_name(message: types.Message, state: FSMContext):
+    cmd_name = message.text.strip().lstrip("/").replace(" ", "_").lower()
+    if not cmd_name:
+        await message.answer("Please send a valid command name:")
+        return
+    await state.update_data(cmd_name=cmd_name)
+    await state.set_state(BotStates.admin_adding_ccmd_reply)
+
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_commands")]
+    ])
+    await message.answer(
+        f"📝 Command: <b>/{cmd_name}</b>\n\n"
+        "Now send the <b>Response Message</b> that the bot should reply when any user types this command (supports HTML):",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+
+@dp.message(BotStates.admin_adding_ccmd_reply)
+async def process_adm_ccmd_reply(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    cmd_name = data["cmd_name"]
+    reply_text = message.text.strip()
+    await state.clear()
+
+    db.set_custom_command(cmd_name, reply_text)
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="⚡ View Commands", callback_data="adm_manage_commands")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await message.answer(
+        f"✅ <b>Command /{cmd_name} is now LIVE!</b>\n\n"
+        f"Users can now type <code>/{cmd_name}</code> to get this reply:\n\n"
+        f"{reply_text}",
+        reply_markup=back_kb,
+        parse_mode="HTML"
+    )
+
+@dp.callback_query(F.data.startswith("adm_del_ccmd_"))
+async def cb_adm_del_ccmd(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cmd_name = call.data.replace("adm_del_ccmd_", "")
+    db.delete_custom_command(cmd_name)
+    await call.answer(f"Command /{cmd_name} deleted!", show_alert=True)
+    cmds = db.get_custom_commands()
+    await call.message.edit_reply_markup(reply_markup=kb.get_admin_commands_keyboard(cmds))
+
+@dp.callback_query(F.data.startswith("adm_view_ccmd_"))
+async def cb_adm_view_ccmd(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cmd_name = call.data.replace("adm_view_ccmd_", "")
+    c = db.get_custom_command(cmd_name)
+    if c:
+        await call.answer(f"/{cmd_name}:\n{c['response_text'][:100]}", show_alert=True)
+    else:
+        await call.answer("Command not found!", show_alert=True)
+
+# ==========================================
+# 🏷️ ADMIN: CATALOG & BRANDS & PACKAGES MANAGER
+# ==========================================
+
+@dp.callback_query(F.data == "adm_manage_catalog")
+async def cb_adm_manage_catalog(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    await state.clear()
+    text = (
+        "📦 <b>PRODUCTS & BRANDS CATALOG MANAGER</b>\n\n"
+        "• Add or delete brands under categories\n"
+        "• Add new packages (duration & price)\n"
+        "• Delete existing packages\n\n"
+        "Choose an action below:"
+    )
+    try:
+        await call.message.edit_text(text, reply_markup=kb.get_admin_catalog_keyboard(), parse_mode="HTML")
+    except Exception:
+        await call.message.answer(text, reply_markup=kb.get_admin_catalog_keyboard(), parse_mode="HTML")
+    await call.answer()
+
+# Add Brand Flow
+@dp.callback_query(F.data == "adm_add_br_cat")
+async def cb_adm_add_br_cat(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cats = db.get_categories()
+    text = "🏷️ <b>ADD BRAND</b>\n\nSelect the Category under which this brand belongs:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_categories_keyboard(cats, "adm_sel_cat_for_brand"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_sel_cat_for_brand_"))
+async def cb_adm_sel_cat_for_brand(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cat_id = int(call.data.replace("adm_sel_cat_for_brand_", ""))
+    await state.set_state(BotStates.admin_adding_br_name)
+    await state.update_data(cat_id=cat_id)
+
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_catalog")]
+    ])
+    await call.message.answer("🏷️ Enter the <b>Brand Name</b> (e.g. <code>STORM VIP</code> or <code>PRO REGEDIT</code>):", reply_markup=cancel_kb, parse_mode="HTML")
+    await call.answer()
+
+@dp.message(BotStates.admin_adding_br_name)
+async def process_adm_br_name(message: types.Message, state: FSMContext):
+    brand_name = message.text.strip()
+    await state.update_data(brand_name=brand_name)
+    await state.set_state(BotStates.admin_adding_br_icon)
+    await message.answer(f"🎨 Enter an emoji icon for <b>{brand_name}</b> (e.g. ⚡, 🛒, 🍏, 🤖):", parse_mode="HTML")
+
+@dp.message(BotStates.admin_adding_br_icon)
+async def process_adm_br_icon(message: types.Message, state: FSMContext):
+    icon = message.text.strip() or "🛒"
+    data = await state.get_data()
+    cat_id = data["cat_id"]
+    brand_name = data["brand_name"]
+    await state.clear()
+
+    db.add_brand(cat_id, brand_name, icon)
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📦 Products & Brands", callback_data="adm_manage_catalog")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await message.answer(f"✅ Brand <b>{icon} {brand_name}</b> successfully created!", reply_markup=back_kb, parse_mode="HTML")
+
+# Delete Brand Flow
+@dp.callback_query(F.data == "adm_del_br_cat")
+async def cb_adm_del_br_cat(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cats = db.get_categories()
+    text = "🗑️ <b>DELETE BRAND</b>\n\nSelect Category to locate brand:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_categories_keyboard(cats, "adm_sel_cat_del_br"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_sel_cat_del_br_"))
+async def cb_adm_sel_cat_del_br(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cat_id = int(call.data.replace("adm_sel_cat_del_br_", ""))
+    brands = db.get_brands_by_category(cat_id)
+    keyboard = []
+    for b in brands:
+        keyboard.append([types.InlineKeyboardButton(text=f"🗑️ Delete {b['name']}", callback_data=f"adm_conf_del_br_{b['id']}")])
+    keyboard.append([types.InlineKeyboardButton(text="🔙 Back to Catalog", callback_data="adm_manage_catalog")])
+    await call.message.edit_text("Click a brand to permanently delete it and its packages:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard))
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_conf_del_br_"))
+async def cb_adm_conf_del_br(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    bid = int(call.data.replace("adm_conf_del_br_", ""))
+    db.delete_brand(bid)
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📦 Products & Brands", callback_data="adm_manage_catalog")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await call.message.edit_text("✅ Brand and its packages successfully deleted!", reply_markup=back_kb)
+    await call.answer("Brand deleted!", show_alert=True)
+
+# Add Package Flow
+@dp.callback_query(F.data == "adm_add_pkg_cat")
+async def cb_adm_add_pkg_cat(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cats = db.get_categories()
+    text = "➕ <b>ADD PACKAGE</b>\n\nSelect Category:"
+    await call.message.edit_text(text, reply_markup=kb.get_admin_categories_keyboard(cats, "adm_sel_cat_add_pkg"), parse_mode="HTML")
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_sel_cat_add_pkg_"))
+async def cb_adm_sel_cat_add_pkg(call: types.CallbackQuery):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    cat_id = int(call.data.replace("adm_sel_cat_add_pkg_", ""))
+    brands = db.get_brands_by_category(cat_id)
+    keyboard = []
+    for b in brands:
+        keyboard.append([types.InlineKeyboardButton(text=f"{b.get('icon','🛒')} {b['name']}", callback_data=f"adm_sel_br_add_pkg_{b['id']}")])
+    keyboard.append([types.InlineKeyboardButton(text="🔙 Back", callback_data="adm_add_pkg_cat")])
+    await call.message.edit_text("Select Brand to add package to:", reply_markup=types.InlineKeyboardMarkup(inline_keyboard=keyboard))
+    await call.answer()
+
+@dp.callback_query(F.data.startswith("adm_sel_br_add_pkg_"))
+async def cb_adm_sel_br_add_pkg(call: types.CallbackQuery, state: FSMContext):
+    if call.from_user.id not in config.ADMIN_IDS:
+        return
+    brand_id = int(call.data.replace("adm_sel_br_add_pkg_", ""))
+    await state.set_state(BotStates.admin_adding_pkg_days)
+    await state.update_data(brand_id=brand_id)
+
+    cancel_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="🔙 Cancel", callback_data="adm_manage_catalog")]
+    ])
+    await call.message.answer(
+        "⏳ Enter duration in <b>Days</b> (e.g. <code>1</code>, <code>7</code>, <code>15</code>, <code>30</code> or <code>0.25</code> for 6h):",
+        reply_markup=cancel_kb,
+        parse_mode="HTML"
+    )
+    await call.answer()
+
+@dp.message(BotStates.admin_adding_pkg_days)
+async def process_adm_pkg_days(message: types.Message, state: FSMContext):
+    try:
+        days = float(message.text.strip())
+        if days <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Please enter a valid positive number for duration days:")
+        return
+
+    await state.update_data(days=days)
+    await state.set_state(BotStates.admin_adding_pkg_label)
+    await message.answer("🏷️ Enter display label (e.g. <code>1 Day VIP</code> or <code>30 Days Global</code>):", parse_mode="HTML")
+
+@dp.message(BotStates.admin_adding_pkg_label)
+async def process_adm_pkg_label(message: types.Message, state: FSMContext):
+    label = message.text.strip()
+    await state.update_data(label=label)
+    await state.set_state(BotStates.admin_adding_pkg_price)
+    await message.answer("💵 Enter price in <b>₹ INR</b> (e.g. <code>120</code> or <code>499</code>):", parse_mode="HTML")
+
+@dp.message(BotStates.admin_adding_pkg_price)
+async def process_adm_pkg_price(message: types.Message, state: FSMContext):
+    try:
+        price = float(message.text.strip())
+        if price <= 0:
+            raise ValueError
+    except ValueError:
+        await message.answer("Please enter a valid price in ₹ INR:")
+        return
+
+    data = await state.get_data()
+    brand_id = data["brand_id"]
+    days = data["days"]
+    label = data["label"]
+    await state.clear()
+
+    db.add_package(brand_id, days, price, duration_label=label)
+    back_kb = types.InlineKeyboardMarkup(inline_keyboard=[
+        [types.InlineKeyboardButton(text="📦 Products & Brands", callback_data="adm_manage_catalog")],
+        [types.InlineKeyboardButton(text="👑 Back to Admin", callback_data="menu_admin_home")]
+    ])
+    await message.answer(
+        f"✅ <b>Package Added Successfully!</b>\n\n"
+        f"• Duration: <b>{label}</b> ({days} days)\n"
+        f"• Price: <b>₹{price:.2f}</b>",
+        reply_markup=back_kb,
+        parse_mode="HTML"
+    )
+
+# ==========================================
+# ⚡ DYNAMIC CUSTOM COMMAND ROUTER
+# ==========================================
+
+@dp.message(StateFilter(None), F.text.startswith("/"))
+async def handle_dynamic_custom_commands(message: types.Message):
+    cmd_raw = message.text.split()[0].lstrip("/").split("@")[0].lower()
+    if cmd_raw in ["start", "admin", "sendkey"]:
+        return
+
+    custom_cmd = db.get_custom_command(cmd_raw)
+    if custom_cmd:
+        await message.answer(custom_cmd["response_text"], parse_mode="HTML")
 
 # ==========================================
 # 🚀 MAIN ENTRYPOINT

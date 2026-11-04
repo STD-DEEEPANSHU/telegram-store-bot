@@ -3,8 +3,11 @@ from config import SUPPORT_USERNAME, DOWNLOAD_CHANNEL_URL, TUTORIAL_VIDEO_URL, I
 import database as db
 
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
-    support_url = SUPPORT_USERNAME if SUPPORT_USERNAME.startswith("http") else f"https://t.me/{SUPPORT_USERNAME.replace('@', '')}"
-    return InlineKeyboardMarkup(inline_keyboard=[
+    support_raw = db.get_setting("support_link", SUPPORT_USERNAME)
+    support_url = support_raw if support_raw.startswith("http") else f"https://t.me/{support_raw.replace('@', '')}"
+    music_url = db.get_setting("music_app_url", "https://stdmusicapp-f82ba5b47ed8.herokuapp.com/static/STD_MUSIC.apk")
+    
+    keyboard = [
         [InlineKeyboardButton(text="🛒 Product Store", callback_data="menu_store")],
         [
             InlineKeyboardButton(text="👤 My Profile", callback_data="menu_profile"),
@@ -19,10 +22,22 @@ def get_main_menu_keyboard() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="🌐 Support", url=support_url)
         ],
         [
-            InlineKeyboardButton(text="🎵 STD Music App ↗️", url="https://stdmusicapp-f82ba5b47ed8.herokuapp.com/static/STD_MUSIC.apk"),
+            InlineKeyboardButton(text="🎵 STD Music App ↗️", url=music_url),
             InlineKeyboardButton(text="⬇️ Download Files", callback_data="menu_downloads")
         ]
-    ])
+    ]
+
+    # Dynamically append admin-configured custom buttons
+    custom_btns = db.get_custom_buttons(active_only=True)
+    if custom_btns:
+        for btn in custom_btns:
+            if btn["button_type"] == "url":
+                b_text = btn["button_text"] if "↗" in btn["button_text"] else f"{btn['button_text']} ↗️"
+                keyboard.append([InlineKeyboardButton(text=b_text, url=btn["button_value"])])
+            else:
+                keyboard.append([InlineKeyboardButton(text=btn["button_text"], callback_data=f"cbtn_{btn['id']}")])
+
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_profile_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -36,14 +51,16 @@ def get_referral_keyboard() -> InlineKeyboardMarkup:
     ])
 
 def get_tutorials_keyboard() -> InlineKeyboardMarkup:
+    tut_url = db.get_setting("tutorial_video_url", TUTORIAL_VIDEO_URL)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🎬 Watch Full Video Tutorial ↗️", url=TUTORIAL_VIDEO_URL)],
+        [InlineKeyboardButton(text="🎬 Watch Full Video Tutorial ↗️", url=tut_url)],
         [InlineKeyboardButton(text="🔙 BACK", callback_data="menu_home")]
     ])
 
 def get_downloads_keyboard() -> InlineKeyboardMarkup:
+    dl_url = db.get_setting("download_channel_url", DOWNLOAD_CHANNEL_URL)
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="⬇️ Access Download Channel ↗️", url=DOWNLOAD_CHANNEL_URL)],
+        [InlineKeyboardButton(text="⬇️ Access Download Channel ↗️", url=dl_url)],
         [InlineKeyboardButton(text="🔙 BACK", callback_data="menu_home")]
     ])
 
@@ -131,22 +148,84 @@ def get_direct_checkout_keyboard(order_ref: str, package_id: int) -> InlineKeybo
 def get_admin_main_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="💰 Change Package Price", callback_data="adm_change_price"),
+            InlineKeyboardButton(text="💰 Change Price", callback_data="adm_change_price"),
+            InlineKeyboardButton(text="📦 Products & Brands", callback_data="adm_manage_catalog")
+        ],
+        [
+            InlineKeyboardButton(text="🔘 Custom Buttons", callback_data="adm_manage_buttons"),
+            InlineKeyboardButton(text="⚡ Custom Commands", callback_data="adm_manage_commands")
+        ],
+        [
+            InlineKeyboardButton(text="📝 Edit Texts & Links", callback_data="adm_manage_texts"),
+            InlineKeyboardButton(text="🔑 Send Key (/sendkey)", callback_data="adm_sendkey_prompt")
+        ],
+        [
+            InlineKeyboardButton(text="💳 Credit User Balance", callback_data="adm_add_bal"),
+            InlineKeyboardButton(text="🎟️ Create Promo Code", callback_data="adm_create_promo")
+        ],
+        [
+            InlineKeyboardButton(text="📢 Broadcast Message", callback_data="adm_broadcast"),
+            InlineKeyboardButton(text="📦 Add Stock Keys", callback_data="adm_add_keys")
+        ],
+        [
+            InlineKeyboardButton(text="📊 Bot Analytics", callback_data="adm_stats"),
+            InlineKeyboardButton(text="🔙 Exit Admin", callback_data="menu_home")
+        ]
+    ])
+
+def get_admin_texts_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="📝 Welcome Message (/start)", callback_data="adm_edit_txt_welcome_msg")],
+        [
+            InlineKeyboardButton(text="🌐 Support Link", callback_data="adm_edit_txt_support_link"),
+            InlineKeyboardButton(text="⬇️ Download Channel", callback_data="adm_edit_txt_download_channel_url")
+        ],
+        [
+            InlineKeyboardButton(text="🎵 Music App APK Link", callback_data="adm_edit_txt_music_app_url"),
+            InlineKeyboardButton(text="🎬 Tutorial Video Link", callback_data="adm_edit_txt_tutorial_video_url")
+        ],
+        [
+            InlineKeyboardButton(text="📲 Paytm UPI ID", callback_data="adm_edit_txt_paytm_upi_id"),
+            InlineKeyboardButton(text="🏷️ Payee Name", callback_data="adm_edit_txt_payee_name")
+        ],
+        [InlineKeyboardButton(text="🏪 Store Name & Tagline", callback_data="adm_edit_txt_store_name")],
+        [InlineKeyboardButton(text="🔙 Back to Admin", callback_data="menu_admin_home")]
+    ])
+
+def get_admin_buttons_keyboard(buttons: list) -> InlineKeyboardMarkup:
+    keyboard = []
+    keyboard.append([InlineKeyboardButton(text="➕ Add New Custom Button", callback_data="adm_add_cbtn_start")])
+    for btn in buttons:
+        b_type = "🔗 URL" if btn["button_type"] == "url" else "💬 Text"
+        keyboard.append([
+            InlineKeyboardButton(text=f"{btn['button_text']} ({b_type})", callback_data=f"adm_view_cbtn_{btn['id']}"),
+            InlineKeyboardButton(text="🗑️ Delete", callback_data=f"adm_del_cbtn_{btn['id']}")
+        ])
+    keyboard.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="menu_admin_home")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_commands_keyboard(commands: list) -> InlineKeyboardMarkup:
+    keyboard = []
+    keyboard.append([InlineKeyboardButton(text="➕ Add New Command", callback_data="adm_add_ccmd_start")])
+    for cmd in commands:
+        keyboard.append([
+            InlineKeyboardButton(text=f"/{cmd['command']}", callback_data=f"adm_view_ccmd_{cmd['command']}"),
+            InlineKeyboardButton(text="🗑️ Delete", callback_data=f"adm_del_ccmd_{cmd['command']}")
+        ])
+    keyboard.append([InlineKeyboardButton(text="🔙 Back to Admin", callback_data="menu_admin_home")])
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
+
+def get_admin_catalog_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="➕ Add New Package", callback_data="adm_add_pkg_cat"),
             InlineKeyboardButton(text="🗑️ Delete Package", callback_data="adm_del_pkg")
         ],
         [
-            InlineKeyboardButton(text="🔑 Send Key (/sendkey)", callback_data="adm_sendkey_prompt"),
-            InlineKeyboardButton(text="💳 Credit User Balance", callback_data="adm_add_bal")
+            InlineKeyboardButton(text="🏷️ Add New Brand", callback_data="adm_add_br_cat"),
+            InlineKeyboardButton(text="🗑️ Delete Brand", callback_data="adm_del_br_cat")
         ],
-        [
-            InlineKeyboardButton(text="🎟️ Create Promo Code", callback_data="adm_create_promo"),
-            InlineKeyboardButton(text="📢 Broadcast Message", callback_data="adm_broadcast")
-        ],
-        [
-            InlineKeyboardButton(text="📦 Add Stock Keys", callback_data="adm_add_keys"),
-            InlineKeyboardButton(text="📊 Bot Analytics", callback_data="adm_stats")
-        ],
-        [InlineKeyboardButton(text="🔙 Exit Admin", callback_data="menu_home")]
+        [InlineKeyboardButton(text="🔙 Back to Admin", callback_data="menu_admin_home")]
     ])
 
 def get_direct_order_action_keyboard(req_id: int) -> InlineKeyboardMarkup:
